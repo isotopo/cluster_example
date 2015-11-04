@@ -1,66 +1,51 @@
 'use strict';
-// Count requestes
-function messageHandler(msg) {
-  if (msg.cmd && msg.cmd === 'notifyRequest') {
-    numReqs += 1;
-  }
-}
 var cluster = require('cluster');
-
-// Code to run if we're in the master process
-if (cluster.isMaster) {
-
-    // Count the machine's CPUs
-    var cpuCount = require('os').cpus().length;
-
-    // Create a worker for each CPU
-    for (var i = 0; i < cpuCount; i += 1) {
-        cluster.fork();
+var numCPUs = require('os').cpus().length;
+var AL = require('nsolvejs').AL;
+module.exports = function (A,B,cb) {
+  var array=[];
+  if (cluster.isMaster) {
+    var i=0,j=0,step,k=0;
+    // Fork workers.
+    for ( i = 0; i < numCPUs; i++) {
+      cluster.fork();
     }
-
-    // Listen for dying workers
-    cluster.on('exit', function (worker) {
-
-        // Replace the dead worker, we're not sentimental
-        console.log('Worker ' + worker.id + ' died :(');
-        cluster.fork();
+     step = A.array.length/numCPUs;
+     i=0;
+     Object.keys(cluster.workers).forEach(function(id) {
+      k=k+1;
+      j=Math.floor(k*step);
+      console.log('msg enviado',i,j);
+      cluster.workers[id].send({array1:A.array,array2:B.array, from:i,to:j});
+      i=j;
+      cluster.workers[id].on('message',function (msg) {
+         array.concat(msg.array);
+      });
 
     });
 
-    // As workers come up.
-    cluster.on('listening', function(worker, address) {
-      console.log('A worker with #'+worker.id+' is now connected to ' + address.address + ':' + address.port);
+    cluster.disconnect(function () {
+      cb((new AL.matrix(array)));
     });
 
-
-
-    // Keep track of http requests
-    var numReqs = 0;
-    setInterval(function() {
-      console.log('numReqs =', numReqs);
-    }, 1000);
-
-    Object.keys(cluster.workers).forEach(function(id) {
-      cluster.workers[id].on('message', messageHandler);
+  }  else if (cluster.isWorker) {
+      cluster.worker.on('message', function(msg) {
+        var l = msg.array1[0].length, l2 = msg.array2[0].length ,array=[];
+        for ( i = msg.from; i < msg.to; i++) {
+          array[i-msg.from]=[];
+          for (j = 0; j < l2; j++) {
+            for ( k = 0; k < l; k++) {
+              array[i-msg.from][j]=msg.array1[i][k]*msg.array2[k][j];
+            }
+          }
+        }
+      msg.array=array;
+      delete  msg.array2;
+      cluster.worker.send(msg);
     });
+  }
 
-// Code to run if we're in a worker process
-} else {
+};
 
-    // Include Express
-    var express = require('express');
-
-    // Create a new Express application
-    var app = express();
-
-    // Add a basic route – index page
-    app.get('/', function (req, res) {
-        res.send('Hello from Worker ' + cluster.worker.id);
-        process.send({ cmd: 'notifyRequest' });
-    });
-
-    // Bind to a port
-    app.listen(3000);
-    console.log('Worker ' + cluster.worker.id + ' running!');
-
-}
+var A=
+module.exports
